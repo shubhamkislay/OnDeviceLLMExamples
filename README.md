@@ -13,24 +13,46 @@ Run [nomic-embed-text-v1.5](https://huggingface.co/nomic-ai/nomic-embed-text-v1.
 
 ## Quick Start
 
-### 1. Clone and download models
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/shubhamkislay/OnDeviceLLMExamples.git
 cd OnDeviceLLMExamples
+```
+
+### 2. Download the model files
+
+The ONNX model files are too large for GitHub (~160MB total), so they must be downloaded separately.
+
+```bash
+# Make the script executable (first time only)
+chmod +x download_model.sh
+
+# Run the download script
 ./download_model.sh
 ```
 
-### 2. Build and run
+This will download:
+- `model.onnx` - Text embedding model (~106MB)
+- `vision_model.onnx` - Image embedding model (~54MB)  
+- `vocab.txt` - BERT vocabulary (~226KB)
+
+Files are automatically placed in `app/src/main/assets/`.
+
+### 3. Build and run
 
 ```bash
 ./gradlew assembleDebug
 ./gradlew installDebug
 ```
 
+Or open in Android Studio and click Run.
+
 ---
 
-## Integration Guide
+## Integration Guide (Add to Your Own Project)
+
+Want to add embedding functionality to your existing Android app? Follow these steps.
 
 ### Step 1: Add Dependencies
 
@@ -81,14 +103,23 @@ The model files are too large for GitHub (~160MB total), so you need to download
 
 These files must be placed in: `app/src/main/assets/`
 
-#### Option A: Using the Download Script (Recommended)
+#### Option A: Copy the Download Script (Recommended)
+
+1. Copy `download_model.sh` from this repo to your project root
+2. Run it:
 
 ```bash
-# From project root
+# Make executable (first time only)
+chmod +x download_model.sh
+
+# Run from your project root directory
 ./download_model.sh
 ```
 
-This automatically downloads all required files to the correct location.
+The script will:
+- Create `app/src/main/assets/` if it doesn't exist
+- Download all 3 required files from Hugging Face
+- Show progress and verify downloads
 
 #### Option B: Manual Download via Terminal
 
