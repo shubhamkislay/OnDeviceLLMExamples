@@ -1,7 +1,6 @@
 package com.shubhamkislay.ondevicellmexamples.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -10,20 +9,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.shubhamkislay.ondevicellmexamples.viewmodel.EmbeddingUiState
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.shubhamkislay.ondevicellmexamples.viewmodel.EmbeddingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmbeddingScreen(
-    uiState: EmbeddingUiState,
-    onTextChange: (String) -> Unit,
-    onGenerateClick: () -> Unit,
-    onClearClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: EmbeddingViewModel = viewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -46,12 +44,12 @@ fun EmbeddingScreen(
             if (uiState.isModelLoading) {
                 ModelLoadingCard()
             } else if (uiState.modelLoadError != null) {
-                ErrorCard(message = uiState.modelLoadError)
+                ErrorCard(message = uiState.modelLoadError!!)
             } else {
                 // Input section
                 InputSection(
                     text = uiState.inputText,
-                    onTextChange = onTextChange,
+                    onTextChange = viewModel::updateInputText,
                     isGenerating = uiState.isGenerating
                 )
 
@@ -61,7 +59,7 @@ fun EmbeddingScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = onGenerateClick,
+                        onClick = viewModel::generateEmbedding,
                         enabled = !uiState.isGenerating && uiState.inputText.isNotBlank(),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -77,7 +75,7 @@ fun EmbeddingScreen(
                     }
                     
                     OutlinedButton(
-                        onClick = onClearClick,
+                        onClick = viewModel::clearEmbedding,
                         enabled = uiState.embedding != null
                     ) {
                         Text("Clear")
@@ -90,9 +88,9 @@ fun EmbeddingScreen(
                 }
                 
                 // Results section
-                if (uiState.embedding != null) {
+                uiState.embedding?.let { embedding ->
                     EmbeddingResultCard(
-                        embedding = uiState.embedding,
+                        embedding = embedding,
                         inferenceTimeMs = uiState.inferenceTimeMs
                     )
                 }
