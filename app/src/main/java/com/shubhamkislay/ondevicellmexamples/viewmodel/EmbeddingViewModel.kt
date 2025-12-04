@@ -3,6 +3,7 @@ package com.shubhamkislay.ondevicellmexamples.viewmodel
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.shubhamkislay.ondevicellmexamples.model.EmbeddingModel
@@ -150,6 +151,7 @@ class EmbeddingViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 },
                 onFailure = { e ->
+                    Log.e("Embedding",e.message.toString())
                     _uiState.value = _uiState.value.copy(
                         isGenerating = false,
                         error = "Failed to generate image embedding: ${e.message}"

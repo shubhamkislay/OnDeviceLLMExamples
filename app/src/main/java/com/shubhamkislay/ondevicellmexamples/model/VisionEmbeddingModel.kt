@@ -27,7 +27,7 @@ class VisionEmbeddingModel(private val context: Context) {
     // Image preprocessing constants (ImageNet normalization)
     private val imageMean = floatArrayOf(0.485f, 0.456f, 0.406f)
     private val imageStd = floatArrayOf(0.229f, 0.224f, 0.225f)
-    private val imageSize = 384 // nomic-embed-vision uses 384x384
+    private val imageSize = 224 // nomic-embed-vision uses 224x224
     
     /**
      * Initialize the model. Call this before generating embeddings.
