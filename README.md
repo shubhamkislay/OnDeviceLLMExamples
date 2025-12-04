@@ -398,30 +398,6 @@ class EmbeddingModel(private val context: Context) {
 
 ### Step 5: Use in Your App
 
-#### Basic Usage
-
-```kotlin
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-class MyRepository(private val context: Context) {
-    
-    private val embeddingModel = EmbeddingModel(context)
-    
-    suspend fun initialize() = withContext(Dispatchers.IO) {
-        embeddingModel.initialize()
-    }
-    
-    suspend fun getEmbedding(text: String): FloatArray? = withContext(Dispatchers.Default) {
-        embeddingModel.generateEmbedding(text).getOrNull()
-    }
-    
-    fun cleanup() {
-        embeddingModel.close()
-    }
-}
-```
-
 #### With ViewModel
 
 ```kotlin
