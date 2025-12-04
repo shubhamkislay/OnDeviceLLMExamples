@@ -89,17 +89,22 @@ class VisionEmbeddingModel(private val context: Context) {
             val inputs = mapOf("pixel_values" to inputTensor)
             val results = session.run(inputs)
             
-            // Get output embedding
-            @Suppress("UNCHECKED_CAST")
+            // Get output embedding - handle different output shapes
             val output = results[0].value
             
-            val embedding = when (output) {
-                is Array<*> -> {
-                    // Shape: [1, 768]
-                    @Suppress("UNCHECKED_CAST")
-                    (output as Array<FloatArray>)[0]
-                }
+            val embedding: FloatArray = when (output) {
                 is FloatArray -> output
+                is Array<*> -> {
+                    when (val first = output[0]) {
+                        is FloatArray -> first // Shape: [1, 768]
+                        is Array<*> -> {
+                            // Shape: [1, seq_len, 768] - take first token (CLS)
+                            @Suppress("UNCHECKED_CAST")
+                            (first as Array<FloatArray>)[0]
+                        }
+                        else -> throw IllegalStateException("Unexpected inner type: ${first?.javaClass}")
+                    }
+                }
                 else -> throw IllegalStateException("Unexpected output type: ${output?.javaClass}")
             }
             
