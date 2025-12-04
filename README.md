@@ -69,20 +69,77 @@ dependencies {
 
 ### Step 2: Download Model Files
 
+The model files are too large for GitHub (~160MB total), so you need to download them separately.
+
+#### Required Files
+
+| File | Size | Purpose |
+|------|------|---------|
+| `model.onnx` | ~106MB | Text embedding model |
+| `vision_model.onnx` | ~54MB | Image embedding model |
+| `vocab.txt` | ~226KB | BERT tokenizer vocabulary |
+
+These files must be placed in: `app/src/main/assets/`
+
+#### Option A: Using the Download Script (Recommended)
+
 ```bash
+# From project root
+./download_model.sh
+```
+
+This automatically downloads all required files to the correct location.
+
+#### Option B: Manual Download via Terminal
+
+```bash
+# Create assets directory
 mkdir -p app/src/main/assets
 
-# Text model (~106MB)
+# Download text model (~106MB)
 curl -L "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_q4f16.onnx" \
     -o "app/src/main/assets/model.onnx"
 
-# Vision model (~54MB)
+# Download vision model (~54MB)
 curl -L "https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5/resolve/main/onnx/model_bnb4.onnx" \
     -o "app/src/main/assets/vision_model.onnx"
 
-# BERT vocabulary
+# Download BERT vocabulary (~226KB)
 curl -L "https://huggingface.co/bert-base-uncased/resolve/main/vocab.txt" \
     -o "app/src/main/assets/vocab.txt"
+```
+
+#### Option C: Manual Download via Browser
+
+1. **Text Model**: 
+   - Go to: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/tree/main/onnx
+   - Click on `model_q4f16.onnx` → Download
+   - Rename to `model.onnx` and place in `app/src/main/assets/`
+
+2. **Vision Model**:
+   - Go to: https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5/tree/main/onnx
+   - Click on `model_bnb4.onnx` → Download
+   - Rename to `vision_model.onnx` and place in `app/src/main/assets/`
+
+3. **Vocabulary**:
+   - Go to: https://huggingface.co/bert-base-uncased/blob/main/vocab.txt
+   - Click Download
+   - Place in `app/src/main/assets/`
+
+#### Verify Your Setup
+
+Your `app/src/main/assets/` folder should look like this:
+
+```
+app/src/main/assets/
+├── model.onnx          (~106 MB)
+├── vision_model.onnx   (~54 MB)
+└── vocab.txt           (~226 KB)
+```
+
+You can verify with:
+```bash
+ls -lh app/src/main/assets/
 ```
 
 ### Step 3: Add the Tokenizer
