@@ -173,6 +173,18 @@ You can verify with:
 ls -lh app/src/main/assets/
 ```
 
+#### Add to .gitignore (Important!)
+
+The model files are too large for GitHub (100MB limit). Add these lines to your `.gitignore` to prevent accidentally committing them:
+
+```gitignore
+# ONNX model files (too large for GitHub - download separately)
+app/src/main/assets/model.onnx
+app/src/main/assets/vision_model.onnx
+```
+
+> **Note**: `vocab.txt` is small (~226KB) and can be committed to git if you prefer.
+
 ### Step 3: Add the Tokenizer
 
 Create `BertTokenizer.kt`:
