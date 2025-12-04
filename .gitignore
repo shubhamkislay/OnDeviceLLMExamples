@@ -85,3 +85,4 @@ Thumbs.db
 
 # Model files (too large for git - download separately)
 app/src/main/assets/model.onnx
+app/src/main/assets/vision_model.onnx

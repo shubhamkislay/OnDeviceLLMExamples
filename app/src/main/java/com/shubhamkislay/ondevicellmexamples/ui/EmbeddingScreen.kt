@@ -1,5 +1,9 @@
 package com.shubhamkislay.ondevicellmexamples.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -8,10 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberAsyncImagePainter
+import com.shubhamkislay.ondevicellmexamples.viewmodel.EmbeddingType
 import com.shubhamkislay.ondevicellmexamples.viewmodel.EmbeddingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -21,11 +29,18 @@ fun EmbeddingScreen(
     viewModel: EmbeddingViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        viewModel.setSelectedImage(uri)
+    }
     
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nomic Embed Text v1.5") },
+                title = { Text("Nomic Embed v1.5") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
@@ -37,48 +52,53 @@ fun EmbeddingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Model loading state
             if (uiState.isModelLoading) {
                 ModelLoadingCard()
             } else if (uiState.modelLoadError != null) {
                 ErrorCard(message = uiState.modelLoadError!!)
             } else {
-                // Input section
-                InputSection(
-                    text = uiState.inputText,
-                    onTextChange = viewModel::updateInputText,
-                    isGenerating = uiState.isGenerating
-                )
-
-                // Action buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = viewModel::generateEmbedding,
-                        enabled = !uiState.isGenerating && uiState.inputText.isNotBlank(),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        if (uiState.isGenerating) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-                        Text(if (uiState.isGenerating) "Generating..." else "Generate Embedding")
-                    }
-                    
+                // Tab selector
+                TabRow(selectedTabIndex = selectedTab) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text("Text") }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text("Image") }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                when (selectedTab) {
+                    0 -> TextInputSection(
+                        text = uiState.inputText,
+                        onTextChange = viewModel::updateInputText,
+                        isGenerating = uiState.isGenerating,
+                        onGenerate = viewModel::generateTextEmbedding
+                    )
+                    1 -> ImageInputSection(
+                        selectedUri = uiState.selectedImageUri,
+                        isGenerating = uiState.isGenerating,
+                        onSelectImage = { imagePickerLauncher.launch("image/*") },
+                        onGenerate = viewModel::generateImageEmbedding
+                    )
+                }
+                
+                // Clear button
+                if (uiState.embedding != null) {
                     OutlinedButton(
                         onClick = viewModel::clearEmbedding,
-                        enabled = uiState.embedding != null
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Clear")
+                        Text("Clear Result")
                     }
                 }
                 
@@ -91,9 +111,117 @@ fun EmbeddingScreen(
                 uiState.embedding?.let { embedding ->
                     EmbeddingResultCard(
                         embedding = embedding,
+                        embeddingType = uiState.embeddingType,
                         inferenceTimeMs = uiState.inferenceTimeMs
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextInputSection(
+    text: String,
+    onTextChange: (String) -> Unit,
+    isGenerating: Boolean,
+    onGenerate: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = onTextChange,
+            label = { Text("Enter text to embed") },
+            placeholder = { Text("Type your text here...") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp),
+            enabled = !isGenerating,
+            maxLines = 5
+        )
+        
+        Button(
+            onClick = onGenerate,
+            enabled = !isGenerating && text.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isGenerating) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(if (isGenerating) "Generating..." else "Generate Text Embedding")
+        }
+    }
+}
+
+@Composable
+private fun ImageInputSection(
+    selectedUri: Uri?,
+    isGenerating: Boolean,
+    onSelectImage: () -> Unit,
+    onGenerate: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Image preview
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            if (selectedUri != null) {
+                Image(
+                    painter = rememberAsyncImagePainter(selectedUri),
+                    contentDescription = "Selected image",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No image selected",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        
+        // Buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onSelectImage,
+                enabled = !isGenerating,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Select Image")
+            }
+            
+            Button(
+                onClick = onGenerate,
+                enabled = !isGenerating && selectedUri != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(if (isGenerating) "Generating..." else "Embed Image")
             }
         }
     }
@@ -116,11 +244,11 @@ private fun ModelLoadingCard() {
         ) {
             CircularProgressIndicator()
             Text(
-                text = "Loading ONNX model...",
+                text = "Loading models...",
                 style = MaterialTheme.typography.bodyLarge
             )
             Text(
-                text = "This may take a moment on first launch",
+                text = "Loading text and vision models",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -144,29 +272,11 @@ private fun ErrorCard(message: String) {
     }
 }
 
-@Composable
-private fun InputSection(
-    text: String,
-    onTextChange: (String) -> Unit,
-    isGenerating: Boolean
-) {
-    OutlinedTextField(
-        value = text,
-        onValueChange = onTextChange,
-        label = { Text("Enter text to embed") },
-        placeholder = { Text("Type your text here...") },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(120.dp),
-        enabled = !isGenerating,
-        maxLines = 5
-    )
-}
-
 
 @Composable
 private fun EmbeddingResultCard(
     embedding: FloatArray,
+    embeddingType: EmbeddingType?,
     inferenceTimeMs: Long
 ) {
     Card(
@@ -187,11 +297,22 @@ private fun EmbeddingResultCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Embedding Result",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+                Column {
+                    Text(
+                        text = when (embeddingType) {
+                            EmbeddingType.TEXT -> "Text Embedding"
+                            EmbeddingType.IMAGE -> "Image Embedding"
+                            null -> "Embedding Result"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = "Dimensions: ${embedding.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
                 Text(
                     text = "${inferenceTimeMs}ms",
                     style = MaterialTheme.typography.labelMedium,
@@ -199,55 +320,16 @@ private fun EmbeddingResultCard(
                 )
             }
             
-            // Dimension info
-            Text(
-                text = "Dimensions: ${embedding.size}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            
             HorizontalDivider()
             
-            // Embedding values (scrollable)
-            Text(
-                text = "Vector values:",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            
-            SelectionContainer {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = embedding.joinToString(separator = ", ") { 
-                            String.format("%.6f", it) 
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-            
-            // First few values preview
-            HorizontalDivider()
-            
+            // First 10 values preview
             Text(
                 text = "First 10 values:",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
             
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 embedding.take(10).forEachIndexed { index, value ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -268,6 +350,36 @@ private fun EmbeddingResultCard(
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
+                }
+            }
+            
+            HorizontalDivider()
+            
+            // Full vector (scrollable)
+            Text(
+                text = "Full vector:",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            
+            SelectionContainer {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = embedding.joinToString(separator = ", ") { 
+                            String.format("%.6f", it) 
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
             }
         }

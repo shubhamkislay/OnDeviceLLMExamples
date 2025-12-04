@@ -39,6 +39,21 @@ else
 fi
 
 echo ""
+echo "Downloading nomic-embed-vision-v1.5 ONNX model (bnb4 quantized)..."
+echo "This may take a while (~54MB)..."
+
+curl -L "https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5/resolve/main/onnx/model_bnb4.onnx" \
+    -o "$ASSETS_DIR/vision_model.onnx" \
+    --progress-bar
+
+if [ $? -eq 0 ]; then
+    echo "✓ Vision model downloaded successfully"
+else
+    echo "✗ Failed to download vision model"
+    exit 1
+fi
+
+echo ""
 echo "Verifying downloads..."
 echo ""
 
@@ -55,6 +70,13 @@ if [ -f "$ASSETS_DIR/vocab.txt" ]; then
     echo "✓ vocab.txt: $VOCAB_SIZE ($VOCAB_LINES tokens)"
 else
     echo "✗ vocab.txt not found"
+fi
+
+if [ -f "$ASSETS_DIR/vision_model.onnx" ]; then
+    VISION_SIZE=$(ls -lh "$ASSETS_DIR/vision_model.onnx" | awk '{print $5}')
+    echo "✓ vision_model.onnx: $VISION_SIZE"
+else
+    echo "✗ vision_model.onnx not found"
 fi
 
 echo ""
