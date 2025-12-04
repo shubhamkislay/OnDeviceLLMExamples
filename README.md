@@ -1,21 +1,22 @@
-# On-Device Text Embeddings with Nomic Embed Text v1.5
+# On-Device Embeddings with Nomic Embed v1.5
 
-Run the [nomic-embed-text-v1.5](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) ONNX model locally on Android to generate text embeddings - completely offline, no API calls needed.
+Run [nomic-embed-text-v1.5](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) and [nomic-embed-vision-v1.5](https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5) ONNX models locally on Android - completely offline, no API calls needed.
 
 ## Features
 
 - 🔒 100% offline - no network required after setup
 - ⚡ Fast inference using ONNX Runtime
 - 📊 768-dimensional embeddings
-- 🎯 Perfect for semantic search, RAG, similarity matching
-- 📱 Optimized for mobile with quantized model
+- 🖼️ Multimodal - embed both text AND images
+- 🎯 Shared vector space - compare text with images directly
+- 📱 Optimized for mobile with quantized models
 
-## Quick Start (This Project)
+## Quick Start
 
-### 1. Clone and download model
+### 1. Clone and download models
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/shubhamkislay/OnDeviceLLMExamples.git
 cd OnDeviceLLMExamples
 ./download_model.sh
 ```
@@ -24,7 +25,6 @@ cd OnDeviceLLMExamples
 
 ```bash
 ./gradlew assembleDebug
-# Install on connected device
 ./gradlew installDebug
 ```
 
@@ -32,29 +32,28 @@ cd OnDeviceLLMExamples
 
 ## Integration Guide
 
-Follow these steps to add text embedding capabilities to your own Android project.
-
 ### Step 1: Add Dependencies
 
-Add to your `gradle/libs.versions.toml`:
+Add to `gradle/libs.versions.toml`:
 
 ```toml
 [versions]
 onnxruntime = "1.19.2"
 coroutines = "1.8.1"
 gson = "2.11.0"
+coil = "2.6.0"
 
 [libraries]
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 ```
 
-Add to your `app/build.gradle.kts`:
+Add to `app/build.gradle.kts`:
 
 ```kotlin
 android {
-    // Prevent compression of ONNX model files
     androidResources {
         noCompress += listOf("onnx")
     }
@@ -64,22 +63,24 @@ dependencies {
     implementation(libs.onnxruntime.android)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.gson)
+    implementation(libs.coil.compose) // For image loading
 }
 ```
 
 ### Step 2: Download Model Files
 
-Create `app/src/main/assets/` folder and download these files:
-
 ```bash
-# Create assets directory
 mkdir -p app/src/main/assets
 
-# Download quantized ONNX model (~106MB)
+# Text model (~106MB)
 curl -L "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/model_q4f16.onnx" \
     -o "app/src/main/assets/model.onnx"
 
-# Download BERT vocabulary
+# Vision model (~54MB)
+curl -L "https://huggingface.co/nomic-ai/nomic-embed-vision-v1.5/resolve/main/onnx/model_bnb4.onnx" \
+    -o "app/src/main/assets/vision_model.onnx"
+
+# BERT vocabulary
 curl -L "https://huggingface.co/bert-base-uncased/resolve/main/vocab.txt" \
     -o "app/src/main/assets/vocab.txt"
 ```
@@ -223,8 +224,7 @@ data class TokenizerOutput(
 )
 ```
 
-
-### Step 4: Add the Embedding Model
+### Step 4: Add the Text Embedding Model
 
 Create `EmbeddingModel.kt`:
 
@@ -250,21 +250,13 @@ class EmbeddingModel(private val context: Context) {
     
     val embeddingDimension = 768
 
-    /**
-     * Initialize the model. Call this before generating embeddings.
-     * This is a heavy operation - do it once, ideally in a background thread.
-     */
     fun initialize(): Result<Unit> {
         return try {
             tokenizer = BertTokenizer(context)
             ortEnvironment = OrtEnvironment.getEnvironment()
-            
-            // Copy model to files dir for memory-efficient loading
             val modelFile = copyAssetToFile("model.onnx")
-            
             val sessionOptions = OrtSession.SessionOptions()
             ortSession = ortEnvironment?.createSession(modelFile.absolutePath, sessionOptions)
-            
             isInitialized = true
             Result.success(Unit)
         } catch (e: Exception) {
@@ -274,14 +266,11 @@ class EmbeddingModel(private val context: Context) {
     
     private fun copyAssetToFile(assetName: String): File {
         val outFile = File(context.filesDir, assetName)
-        
         val assetFd = context.assets.openFd(assetName)
         val assetSize = assetFd.length
         assetFd.close()
         
-        if (outFile.exists() && outFile.length() == assetSize) {
-            return outFile
-        }
+        if (outFile.exists() && outFile.length() == assetSize) return outFile
         
         context.assets.open(assetName).use { input ->
             FileOutputStream(outFile).use { output ->
@@ -295,31 +284,18 @@ class EmbeddingModel(private val context: Context) {
         return outFile
     }
 
-    /**
-     * Generate embedding for text.
-     * @param text The input text to embed
-     * @param isQuery true for search queries, false for documents being indexed
-     * @return 768-dimensional normalized embedding vector
-     */
     fun generateEmbedding(text: String, isQuery: Boolean = true): Result<FloatArray> {
-        if (!isInitialized) {
-            return Result.failure(IllegalStateException("Model not initialized"))
-        }
+        if (!isInitialized) return Result.failure(IllegalStateException("Model not initialized"))
         
         val env = ortEnvironment ?: return Result.failure(IllegalStateException("ORT environment is null"))
         val session = ortSession ?: return Result.failure(IllegalStateException("ORT session is null"))
         val tok = tokenizer ?: return Result.failure(IllegalStateException("Tokenizer is null"))
         
         return try {
-            // Nomic requires task prefixes
             val prefixedText = if (isQuery) "search_query: $text" else "search_document: $text"
-            
             val encoded = tok.encode(prefixedText, maxLength = 512)
             
-            val batchSize = 1L
-            val seqLength = encoded.inputIds.size.toLong()
-            val shape = longArrayOf(batchSize, seqLength)
-            
+            val shape = longArrayOf(1L, encoded.inputIds.size.toLong())
             val inputIdsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.inputIds), shape)
             val attentionMaskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.attentionMask), shape)
             val tokenTypeIdsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(encoded.tokenTypeIds), shape)
@@ -334,7 +310,6 @@ class EmbeddingModel(private val context: Context) {
             
             @Suppress("UNCHECKED_CAST")
             val outputTensor = results[0].value as Array<Array<FloatArray>>
-            
             val embedding = meanPooling(outputTensor[0], encoded.attentionMask)
             val normalizedEmbedding = l2Normalize(embedding)
             
@@ -373,16 +348,9 @@ class EmbeddingModel(private val context: Context) {
     
     private fun l2Normalize(embedding: FloatArray): FloatArray {
         var sumSquares = 0f
-        for (value in embedding) {
-            sumSquares += value * value
-        }
+        for (value in embedding) sumSquares += value * value
         val norm = sqrt(sumSquares)
-        
-        return if (norm > 0) {
-            FloatArray(embedding.size) { embedding[it] / norm }
-        } else {
-            embedding
-        }
+        return if (norm > 0) FloatArray(embedding.size) { embedding[it] / norm } else embedding
     }
 
     fun close() {
@@ -396,139 +364,284 @@ class EmbeddingModel(private val context: Context) {
 }
 ```
 
-### Step 5: Use in Your App
 
-#### With ViewModel
+### Step 5: Add the Vision Embedding Model
+
+Create `VisionEmbeddingModel.kt`:
+
+```kotlin
+package com.yourpackage.model
+
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.FloatBuffer
+import kotlin.math.sqrt
+
+class VisionEmbeddingModel(private val context: Context) {
+    
+    private var ortEnvironment: OrtEnvironment? = null
+    private var ortSession: OrtSession? = null
+    private var isInitialized = false
+    
+    val embeddingDimension = 768
+    
+    // ImageNet normalization
+    private val imageMean = floatArrayOf(0.485f, 0.456f, 0.406f)
+    private val imageStd = floatArrayOf(0.229f, 0.224f, 0.225f)
+    private val imageSize = 224
+
+    fun initialize(): Result<Unit> {
+        return try {
+            ortEnvironment = OrtEnvironment.getEnvironment()
+            val modelFile = copyAssetToFile("vision_model.onnx")
+            val sessionOptions = OrtSession.SessionOptions()
+            ortSession = ortEnvironment?.createSession(modelFile.absolutePath, sessionOptions)
+            isInitialized = true
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    private fun copyAssetToFile(assetName: String): File {
+        val outFile = File(context.filesDir, assetName)
+        val assetFd = context.assets.openFd(assetName)
+        val assetSize = assetFd.length
+        assetFd.close()
+        
+        if (outFile.exists() && outFile.length() == assetSize) return outFile
+        
+        context.assets.open(assetName).use { input ->
+            FileOutputStream(outFile).use { output ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                }
+            }
+        }
+        return outFile
+    }
+
+    fun generateEmbedding(bitmap: Bitmap): Result<FloatArray> {
+        if (!isInitialized) return Result.failure(IllegalStateException("Model not initialized"))
+        
+        val env = ortEnvironment ?: return Result.failure(IllegalStateException("ORT environment is null"))
+        val session = ortSession ?: return Result.failure(IllegalStateException("ORT session is null"))
+        
+        return try {
+            val inputTensor = preprocessImage(bitmap, env)
+            val inputs = mapOf("pixel_values" to inputTensor)
+            val results = session.run(inputs)
+            
+            val output = results[0].value
+            val embedding: FloatArray = when (output) {
+                is FloatArray -> output
+                is Array<*> -> {
+                    when (val first = output[0]) {
+                        is FloatArray -> first
+                        is Array<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            (first as Array<FloatArray>)[0]
+                        }
+                        else -> throw IllegalStateException("Unexpected output type")
+                    }
+                }
+                else -> throw IllegalStateException("Unexpected output type")
+            }
+            
+            val normalizedEmbedding = l2Normalize(embedding)
+            inputTensor.close()
+            results.close()
+            
+            Result.success(normalizedEmbedding)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    fun generateEmbedding(imageUri: Uri): Result<FloatArray> {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(imageUri)
+                ?: return Result.failure(IllegalArgumentException("Cannot open image URI"))
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+            if (bitmap == null) return Result.failure(IllegalArgumentException("Cannot decode image"))
+            val result = generateEmbedding(bitmap)
+            bitmap.recycle()
+            result
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    private fun preprocessImage(bitmap: Bitmap, env: OrtEnvironment): OnnxTensor {
+        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, imageSize, imageSize, true)
+        val pixels = IntArray(imageSize * imageSize)
+        resizedBitmap.getPixels(pixels, 0, imageSize, 0, 0, imageSize, imageSize)
+        
+        val floatValues = FloatArray(3 * imageSize * imageSize)
+        
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val r = ((pixel shr 16) and 0xFF) / 255.0f
+            val g = ((pixel shr 8) and 0xFF) / 255.0f
+            val b = (pixel and 0xFF) / 255.0f
+            
+            // CHW format with normalization
+            floatValues[i] = (r - imageMean[0]) / imageStd[0]
+            floatValues[imageSize * imageSize + i] = (g - imageMean[1]) / imageStd[1]
+            floatValues[2 * imageSize * imageSize + i] = (b - imageMean[2]) / imageStd[2]
+        }
+        
+        if (resizedBitmap != bitmap) resizedBitmap.recycle()
+        
+        val shape = longArrayOf(1, 3, imageSize.toLong(), imageSize.toLong())
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(floatValues), shape)
+    }
+    
+    private fun l2Normalize(embedding: FloatArray): FloatArray {
+        var sumSquares = 0f
+        for (value in embedding) sumSquares += value * value
+        val norm = sqrt(sumSquares)
+        return if (norm > 0) FloatArray(embedding.size) { embedding[it] / norm } else embedding
+    }
+
+    fun close() {
+        ortSession?.close()
+        ortEnvironment?.close()
+        ortSession = null
+        ortEnvironment = null
+        isInitialized = false
+    }
+}
+```
+
+### Step 6: Use in Your App
+
+#### ViewModel with Both Models
 
 ```kotlin
 class EmbeddingViewModel(application: Application) : AndroidViewModel(application) {
     
-    private val embeddingModel = EmbeddingModel(application)
+    private val textModel = EmbeddingModel(application)
+    private val visionModel = VisionEmbeddingModel(application)
     
-    private val _embedding = MutableStateFlow<FloatArray?>(null)
-    val embedding: StateFlow<FloatArray?> = _embedding.asStateFlow()
+    private val _textEmbedding = MutableStateFlow<FloatArray?>(null)
+    val textEmbedding: StateFlow<FloatArray?> = _textEmbedding.asStateFlow()
     
-    private val _isLoading = MutableStateFlow(true)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private val _imageEmbedding = MutableStateFlow<FloatArray?>(null)
+    val imageEmbedding: StateFlow<FloatArray?> = _imageEmbedding.asStateFlow()
     
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                embeddingModel.initialize()
+                textModel.initialize()
+                visionModel.initialize()
             }
-            _isLoading.value = false
         }
     }
     
-    fun generateEmbedding(text: String) {
+    fun generateTextEmbedding(text: String) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
-                embeddingModel.generateEmbedding(text)
+                textModel.generateEmbedding(text)
             }
-            _embedding.value = result.getOrNull()
+            _textEmbedding.value = result.getOrNull()
+        }
+    }
+    
+    fun generateImageEmbedding(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                visionModel.generateEmbedding(uri)
+            }
+            _imageEmbedding.value = result.getOrNull()
         }
     }
     
     override fun onCleared() {
         super.onCleared()
-        embeddingModel.close()
+        textModel.close()
+        visionModel.close()
     }
 }
 ```
 
-#### Compute Similarity Between Texts
+#### Cross-Modal Similarity (Text ↔ Image)
 
 ```kotlin
 fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
-    require(a.size == b.size) { "Vectors must have same dimension" }
-    
     var dotProduct = 0f
     var normA = 0f
     var normB = 0f
-    
     for (i in a.indices) {
         dotProduct += a[i] * b[i]
         normA += a[i] * a[i]
         normB += b[i] * b[i]
     }
-    
     return dotProduct / (sqrt(normA) * sqrt(normB))
 }
 
-// Usage
-val embedding1 = embeddingModel.generateEmbedding("How do I reset my password?").getOrNull()
-val embedding2 = embeddingModel.generateEmbedding("I forgot my login credentials").getOrNull()
+// Compare text query with image
+val textEmb = textModel.generateEmbedding("a photo of a cat").getOrNull()
+val imageEmb = visionModel.generateEmbedding(catImageUri).getOrNull()
 
-if (embedding1 != null && embedding2 != null) {
-    val similarity = cosineSimilarity(embedding1, embedding2)
-    println("Similarity: $similarity") // ~0.85 (high similarity)
+if (textEmb != null && imageEmb != null) {
+    val similarity = cosineSimilarity(textEmb, imageEmb)
+    println("Text-Image similarity: $similarity")
 }
 ```
-
 
 ---
 
 ## Model Variants
 
-Different quantized versions are available. Choose based on your needs:
+### Text Models (nomic-embed-text-v1.5)
 
-| Model | Size | Quality | Download |
-|-------|------|---------|----------|
-| `model.onnx` | 522MB | Best | Full precision |
-| `model_fp16.onnx` | 261MB | Great | Half precision |
-| `model_quantized.onnx` | 131MB | Good | INT8 quantized |
-| `model_q4f16.onnx` | 106MB | Good | Q4 + FP16 (recommended) |
-| `model_q4.onnx` | 157MB | Good | Q4 quantized |
+| Model | Size | Notes |
+|-------|------|-------|
+| `model_q4f16.onnx` | 106MB | Recommended |
+| `model_quantized.onnx` | 131MB | INT8 |
+| `model_fp16.onnx` | 261MB | Higher quality |
 
-Download any variant:
-```bash
-curl -L "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main/onnx/<model_name>" \
-    -o "app/src/main/assets/model.onnx"
-```
+### Vision Models (nomic-embed-vision-v1.5)
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `model_bnb4.onnx` | 54MB | Recommended |
+| `model_int8.onnx` | 92MB | INT8 |
+| `model_fp16.onnx` | 179MB | Higher quality |
 
 ---
 
 ## Important Notes
 
-### Task Prefixes
-Nomic-embed-text requires task prefixes for optimal performance:
-- Use `"search_query: "` prefix for queries/questions
-- Use `"search_document: "` prefix for documents being indexed
+### Shared Vector Space
+Text and image embeddings exist in the same 768-dimensional space. You can directly compare:
+- Text ↔ Text
+- Image ↔ Image  
+- Text ↔ Image (cross-modal search!)
 
-The `EmbeddingModel.generateEmbedding()` handles this automatically via the `isQuery` parameter.
+### Task Prefixes (Text Only)
+- `"search_query: "` for queries
+- `"search_document: "` for documents
 
-### Memory Considerations
-- The model file is copied from assets to internal storage on first run
-- This avoids loading the entire model into memory (which causes OOM)
-- First launch takes a few extra seconds for the copy
-- Subsequent launches are faster
+### Image Preprocessing
+- Images are resized to 224x224
+- Normalized with ImageNet mean/std
+- Converted to CHW format
 
 ### Threading
-- `initialize()` is blocking and should run on `Dispatchers.IO`
-- `generateEmbedding()` is CPU-intensive and should run on `Dispatchers.Default`
-- Never call these on the main thread
-
-### APK Size
-The model adds ~100-130MB to your APK. Consider:
-- Using Android App Bundles for on-demand delivery
-- Downloading the model at runtime instead of bundling
-- Using the smallest quantized model that meets your quality needs
-
----
-
-## Troubleshooting
-
-### OutOfMemoryError during model loading
-Make sure you're using the file-based loading approach (copying to filesDir first), not loading the entire model as a byte array.
-
-### "Not enough space" during installation
-The APK is large (~200MB). Free up space on your device/emulator or use a device with more storage.
-
-### Slow first launch
-The model is copied from assets to internal storage on first run. This is normal and only happens once.
-
-### Model not found
-Ensure `model.onnx` and `vocab.txt` are in `app/src/main/assets/`.
+- `initialize()` → `Dispatchers.IO`
+- `generateEmbedding()` → `Dispatchers.Default`
 
 ---
 
@@ -536,17 +649,17 @@ Ensure `model.onnx` and `vocab.txt` are in `app/src/main/assets/`.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      Your App                           │
+│                    Text Embedding                       │
 ├─────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌──────────────┐    ┌───────────┐  │
-│  │   Input     │───▶│  Tokenizer   │───▶│   ONNX    │  │
-│  │   Text      │    │  (WordPiece) │    │  Runtime  │  │
-│  └─────────────┘    └──────────────┘    └─────┬─────┘  │
-│                                               │        │
-│  ┌─────────────┐    ┌──────────────┐    ┌─────▼─────┐  │
-│  │  Embedding  │◀───│ L2 Normalize │◀───│   Mean    │  │
-│  │  (768-dim)  │    │              │    │  Pooling  │  │
-│  └─────────────┘    └──────────────┘    └───────────┘  │
+│  Text → Tokenizer → ONNX Model → Mean Pool → L2 Norm   │
+└─────────────────────────────────────────────────────────┘
+                           ↓
+                    768-dim Vector ←──── Shared Space
+                           ↑
+┌─────────────────────────────────────────────────────────┐
+│                   Image Embedding                       │
+├─────────────────────────────────────────────────────────┤
+│  Image → Resize/Norm → ONNX Model → L2 Norm            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -558,6 +671,6 @@ MIT License
 
 ## Credits
 
-- [Nomic AI](https://www.nomic.ai/) for the nomic-embed-text-v1.5 model
+- [Nomic AI](https://www.nomic.ai/) for nomic-embed-text and nomic-embed-vision models
 - [ONNX Runtime](https://onnxruntime.ai/) for the inference engine
 - [Hugging Face](https://huggingface.co/) for model hosting
